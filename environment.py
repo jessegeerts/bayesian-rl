@@ -122,8 +122,11 @@ class SimpleMDP(Environment):
         self.terminal_states = [self.nr_states - 1]
 
         self.transition_probabilities = self.define_transition_probabilities()
-        self.reward_func = np.zeros(self.nr_states, self.nr_actions)
+        self.reward_func = np.zeros((self.nr_states, self.nr_actions))
         self.reward_func[self.nr_states-2, 1] = 1
+        self.current_state = 0
+
+    def reset(self):
         self.current_state = 0
 
     def define_transition_probabilities(self):
