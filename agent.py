@@ -6,18 +6,9 @@ from utils import softmax
 
 
 class BayesQlearner(object):
-    """Use bayesian Q learning to estimate action values with confidence.
+    """Use bayesian Q learning to estimate a posterior over action values.
 
-    At some point, we're gonna have to estimate the beta parameters given new mean and variance.
-
-    R code for doing so:
-
-    estBetaParams <- function(mu, var) {
-        alpha <- ((1 - mu) / var - 1 / mu) * mu ^ 2
-        beta <- alpha * (1 / mu - 1)
-        return(params = list(alpha = alpha, beta = beta))
-    }
-
+    Following Daw & Dayan, I use beta priors and Dearden's mixture update of the posterior.
     """
 
     def __init__(self, environment=SimpleMDP(), inv_temp=2):
@@ -26,11 +17,8 @@ class BayesQlearner(object):
         self.actions = np.arange(self.env.nr_actions)
         self.nr_params = 2  # alpha and beta, the parameters determining the beta distribution
         self.q_params = np.empty((self.env.nr_states, self.env.nr_actions, self.nr_params))
-        self.prior_a = 1
+        self.prior_a = .1
         self.prior_b = 1
-        #self.q_dists = [[beta(self.prior_a, self.prior_b)
-        #                 for a in range(self.env.nr_actions)]
-        #                for s in range(self.env.nr_states)]
 
         self.q_dists = []
         for s in range(self.env.nr_states):
@@ -56,39 +44,94 @@ class BayesQlearner(object):
             next_state, reward = self.env.act(a)
 
             if self.env.is_terminal(next_state):
-                # Update reward distribution of terminal state
-                r_alpha = self.q_dists[next_state].args[0] + reward
-                r_beta = self.q_dists[next_state].args[1] + (1 - reward)
-                self.q_dists[next_state] = beta(r_alpha, r_beta)
-                # update value distribution of predecessor state action pair
-                post_mean = (self.q_dists[s][a].args[0] + self.q_dists[next_state].moment(1)) / \
-                            (sum(self.q_dists[s][a].args) + 1)
+                # Update terminal state reward distribution:
+                self.q_dists[next_state] = self.update_reward_distribution(next_state, reward)
 
-                pre_a = self.q_dists[s][a].args[0]
-                pre_b = self.q_dists[s][a].args[1]
-                post_var = 1 / ((pre_a + pre_b + 2) * (pre_a + pre_b + 1)) * (
-                            pre_a ** 2 + pre_a + self.q_dists[next_state].moment(2) + (2 * pre_a + 1) *
-                            self.q_dists[next_state].moment(1)) - post_mean ** 2
-                pre_alpha, pre_beta = self.est_beta_params(post_mean, post_var)
-                self.q_dists[s][a] = beta(pre_alpha, pre_beta)
-            else:
-                # update value distribution of predecessor state action pair
-                a_prime = np.argmax([q.mean() for q in self.q_dists[next_state]])
-                post_mean = (self.q_dists[s][a].args[0] + self.q_dists[next_state][a_prime].moment(1)) / \
-                            (sum(self.q_dists[s][a].args) + 1)
-
-                pre_a = self.q_dists[s][a].args[0]
-                pre_b = self.q_dists[s][a].args[1]
-                post_var = 1 / ((pre_a + pre_b + 2) * (pre_a + pre_b + 1)) * (
-                            pre_a ** 2 + pre_a + self.q_dists[next_state][a_prime].moment(2) + (2 * pre_a + 1) *
-                            self.q_dists[next_state][a_prime].moment(1)) - post_mean ** 2
-                pre_alpha, pre_beta = self.est_beta_params(post_mean, post_var)
-                self.q_dists[s][a] = beta(pre_alpha, pre_beta)
+            # update value distribution of predecessor state action pair
+            self.q_dists[s][a] = self.update_qvalue_distribution(s, a, next_state)
 
             s = next_state
             t += 1
-        return
+        return t
 
+    def update_qvalue_distribution(self, s, a, next_state):
+        """Update the Q value distribution for state-action pair (s,a).
+
+        The successor state's value is used as bootstrapped sample of the predecessor state's mean value.
+        I compute the mean and variance of the posterior distribution, and then estimate the updated alpha
+        and beta parameters (see Daw & Dayan, 2005).
+
+        :param s: Predecessor state.
+        :param a: Current action.
+        :param next_state: Successor state.
+        :return:
+        """
+        post_mean = self.update_posterior_mean(s, a, next_state)
+        post_var = self.update_posterior_var(s, a, next_state, post_mean)
+        pre_alpha, pre_beta = self.est_beta_params(post_mean, post_var)
+        posterior = beta(pre_alpha, pre_beta)
+        return posterior
+
+    def update_posterior_mean(self, s, a, next_state):
+        """Compute mean of posterior Q value distribution.
+
+        :param s:
+        :param a:
+        :param next_state:
+        :return:
+        """
+        if self.env.is_terminal(next_state):
+            next_state_dist = self.q_dists[next_state]
+        else:
+            a_prime = np.argmax([q.mean() for q in self.q_dists[next_state]])
+            next_state_dist = self.q_dists[next_state][a_prime]
+
+        alpha_s = self.get_alpha(self.q_dists[s][a])
+        beta_s = self.get_beta(self.q_dists[s][a])
+        post_mean = (alpha_s + next_state_dist.moment(1)) / (alpha_s + beta_s + 1)
+        return post_mean
+
+    def update_posterior_var(self, s, a, next_state, posterior_mean):
+        """Compute variance of posterior Q value distribution.
+
+        :param s:
+        :param a:
+        :param next_state:
+        :param posterior_mean:
+        :return:
+        """
+        if self.env.is_terminal(next_state):
+            next_state_dist = self.q_dists[next_state]
+        else:
+            a_prime = np.argmax([q.mean() for q in self.q_dists[next_state]])
+            next_state_dist = self.q_dists[next_state][a_prime]
+        alpha_s = self.get_alpha(self.q_dists[s][a])
+        beta_s = self.get_beta(self.q_dists[s][a])
+
+        post_var = 1 / ((alpha_s + beta_s + 2) * (alpha_s + beta_s + 1)) * (
+                alpha_s ** 2 + alpha_s + next_state_dist.moment(2) + (2 * alpha_s + 1) *
+                next_state_dist.moment(1)) - posterior_mean ** 2
+        return post_var
+
+    @staticmethod
+    def get_alpha(beta_rv):
+        return beta_rv.args[0]
+
+    @staticmethod
+    def get_beta(beta_rv):
+        return beta_rv.args[1]
+
+    def update_reward_distribution(self, terminal_state_idx, reward):
+        """Compute posterior reward distribution in terminal state.
+
+        :param terminal_state_idx:
+        :param reward:
+        :return:
+        """
+        new_alpha = self.q_dists[terminal_state_idx].args[0] + reward
+        new_beta = self.q_dists[terminal_state_idx].args[1] + (1 - reward)
+        posterior = beta(new_alpha, new_beta)
+        return posterior
 
     @staticmethod
     def est_beta_params(mu, var):
@@ -107,7 +150,10 @@ if __name__ == "__main__":
 
     agent = BayesQlearner()
 
+    rvs = []
     for ep in range(20):
         agent.train_one_episiode()
+        first_action_dist = agent.q_dists[0][1]
+        rvs.append(first_action_dist)
 
     agent.q_dists
