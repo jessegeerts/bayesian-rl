@@ -31,7 +31,7 @@ class BayesQlearner(object):
                     qd.append(beta(self.prior_a, self.prior_b))
             self.q_dists.append(qd)
 
-    def train_one_episiode(self):
+    def train_one_episode(self):
         self.env.reset()
 
         t = 0
@@ -146,14 +146,107 @@ class BayesQlearner(object):
         return alpha, beta
 
 
+class KTDV(object):
+    """Implementation of the Kalman TD value approximation algorithm with linear function approximation (Geist &
+    Pietquin, 2012).
+
+    We ignore control for now. The agent follows a random policy.
+    """
+    def __init__(self, environment=SimpleMDP(), gamma=.9):
+        self.env = environment
+        self.actions = np.arange(self.env.nr_actions)
+
+        # Parameters
+        self.transition_noise = .005 * np.eye(self.env.nr_states)
+        self.gamma = gamma
+        self.observation_noise_variance = 1
+
+        # Initialise priors
+        self.prior_theta = np.zeros(self.env.nr_states)
+        self.prior_covariance = np.eye(self.env.nr_states)
+
+        self.theta = self.prior_theta
+        self.covariance = self.prior_covariance
+
+    def train_one_episode(self):
+        self.env.reset()
+
+        t = 0
+        s = self.env.current_state
+        features = self.get_feature_representation(s)
+
+        results = {}
+
+        while not self.env.is_terminal(self.env.current_state):
+            # Observe transition and reward;
+            a = np.random.choice(self.actions)
+            a = 1
+            next_state, reward = self.env.act(a)
+            next_features = self.get_feature_representation(next_state)
+            H = features - self.gamma * next_features  # Temporal difference features
+
+            # Prediction step;
+            a_priori_covariance = self.covariance + self.transition_noise
+
+            # Compute statistics of interest;
+            V = np.dot(features, self.theta)
+            r_hat = np.dot(H, self.theta)
+            delta_t = reward - r_hat  # the "prediction error". Actually expected value of the prediction error
+            residual_cov = np.dot(H, np.matmul(a_priori_covariance, H)) + self.observation_noise_variance
+
+            # Correction step;
+            kalman_gain = np.matmul(a_priori_covariance, H) * residual_cov**-1
+            self.theta = self.theta + kalman_gain * delta_t  # weight update
+            self.covariance = a_priori_covariance - np.outer(kalman_gain, residual_cov*kalman_gain)
+            #self.covariance = new_cov - np.matmul(np.outer(kalman_gain, H), new_cov)
+            #TODO: There's a discrepancy here between Gershman and Pietquin. resolve this. Mathematically equivalent?
+
+            # Store results
+            results[t] = {'weights': self.theta,
+                          'cov': self.covariance,
+                          'K': kalman_gain,
+                          'dt': delta_t,
+                          'r': reward,
+                          'state': s,
+                          'rhat': r_hat,
+                          'V': V}
+
+            s = next_state
+            features = self.get_feature_representation(s)
+            t += 1
+
+        return results
+
+    def get_feature_representation(self, state_idx):
+        """Get one-hot feature representation from state index.
+        """
+        if self.env.is_terminal(state_idx):
+            return np.zeros(self.env.nr_states)
+        else:
+            return np.eye(self.env.nr_states)[state_idx]
+
+
 if __name__ == "__main__":
 
-    agent = BayesQlearner()
+    alg = 0
 
-    rvs = []
-    for ep in range(20):
-        agent.train_one_episiode()
-        first_action_dist = agent.q_dists[0][1]
-        rvs.append(first_action_dist)
+    if alg == 0:
+        agent = KTDV()
 
-    agent.q_dists
+        all_results = {}
+        for ep in range(200):
+            results = agent.train_one_episode()
+            all_results[ep] = results
+
+    print('')
+
+    if alg == 1:
+
+        agent = BayesQlearner()
+
+        rvs = []
+        for ep in range(20):
+            agent.train_one_episode()
+            first_action_dist = agent.q_dists[0][1]
+            rvs.append(first_action_dist)
+
