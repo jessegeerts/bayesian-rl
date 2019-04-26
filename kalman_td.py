@@ -60,4 +60,4 @@ for n in range(N-1):
     model[n]['rhat'] = rhat
 
 
-# TODO: why negative? why this weird turnaround? maybe ask sam? 
+# TODO: why negative? why this weird turnaround? maybe ask sam?
