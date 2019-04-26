@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.stats import beta
 
-from environment import SimpleMDP
+from environment import SimpleMDP, GridWorld
 from utils import softmax
 
 
@@ -35,9 +35,9 @@ class BayesQlearner(object):
         self.env.reset()
 
         t = 0
-        s = self.env.current_state
+        s = self.env.get_current_state()
 
-        while not self.env.is_terminal(self.env.current_state):
+        while not self.env.is_terminal(self.env.get_current_state()):
             q_value_means = [q.mean() for q in self.q_dists[s]]
             action_probabilities = softmax(q_value_means, beta=self.inv_temp)
             a = np.random.choice(self.actions, p=action_probabilities)
@@ -154,7 +154,7 @@ class KTDV(object):
     """
     def __init__(self, environment=SimpleMDP(), gamma=.9):
         self.env = environment
-        self.actions = np.arange(self.env.nr_actions)
+        self.actions = self.env.actions
 
         # Parameters
         self.transition_noise = .005 * np.eye(self.env.nr_states)
@@ -168,20 +168,24 @@ class KTDV(object):
         self.theta = self.prior_theta
         self.covariance = self.prior_covariance
 
-    def train_one_episode(self):
+    def train_one_episode(self, random_policy=False):
         self.env.reset()
 
         t = 0
-        s = self.env.current_state
+        s = self.env.get_current_state()
         features = self.get_feature_representation(s)
 
         results = {}
 
-        while not self.env.is_terminal(self.env.current_state):
+        while not self.env.is_terminal(self.env.get_current_state()) and t < 1000:
             # Observe transition and reward;
-            a = np.random.choice(self.actions)
-            a = 1
+            if random_policy:
+                a = np.random.choice(self.actions)
+            else:
+                a = self.select_action()
+
             next_state, reward = self.env.act(a)
+
             next_features = self.get_feature_representation(next_state)
             H = features - self.gamma * next_features  # Temporal difference features
 
@@ -217,6 +221,19 @@ class KTDV(object):
 
         return results
 
+    def select_action(self):
+        Q = []
+        for idx, a in enumerate(self.actions):
+            s_prime = self.env.get_destination_state(self.env.get_current_state(), idx)[0]
+            features = self.get_feature_representation(s_prime)
+            V = np.dot(features, self.theta)
+            if self.env.is_terminal(s_prime):
+                V = 1
+            Q.append(V)
+
+        action = np.random.choice(self.actions, p=softmax(Q))
+        return action
+
     def get_feature_representation(self, state_idx):
         """Get one-hot feature representation from state index.
         """
@@ -231,11 +248,11 @@ if __name__ == "__main__":
     alg = 0
 
     if alg == 0:
-        agent = KTDV()
+        agent = KTDV(environment=GridWorld('./mdps/10x10.mdp'))
 
         all_results = {}
         for ep in range(200):
-            results = agent.train_one_episode()
+            results = agent.train_one_episode(random_policy=False)
             all_results[ep] = results
 
     print('')
