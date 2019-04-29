@@ -152,13 +152,14 @@ class KTDV(object):
 
     We ignore control for now. The agent follows a random policy.
     """
-    def __init__(self, environment=SimpleMDP(), gamma=.9):
+    def __init__(self, environment=SimpleMDP(), gamma=.9, inv_temp=2):
         self.env = environment
         self.actions = self.env.actions
 
         # Parameters
         self.transition_noise = .005 * np.eye(self.env.nr_states)
         self.gamma = gamma
+        self.inv_temp = inv_temp  # exploration parameter
         self.observation_noise_variance = 1
 
         # Initialise priors
@@ -231,7 +232,7 @@ class KTDV(object):
                 V = 1
             Q.append(V)
 
-        action = np.random.choice(self.actions, p=softmax(Q))
+        action = np.random.choice(self.actions, p=softmax(Q, beta=self.inv_temp))
         return action
 
     def get_feature_representation(self, state_idx):
