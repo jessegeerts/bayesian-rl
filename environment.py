@@ -200,8 +200,13 @@ class GridWorld(Environment):
     """Grid world environment, where agent can move around and there is one (terminal) goal state. In this version,
     we read the grid environment from an MDP file. This way we can easily include walls, etc.
     """
-    def __init__(self, env_path):
+    def __init__(self, env_name):
         Environment.__init__(self)
+        if '.mdp' in env_name:
+            env_path = env_name
+        else:
+            env_path = './mdps/{}.mdp'.format(env_name)
+
         self.matrix_MDP = None
         self.original_goal_x = None
         self.original_goal_y = None
@@ -293,14 +298,18 @@ class GridWorld(Environment):
     def get_state_idx(self, x, y):
         """Given coordinates, return the state index.
         """
-        idx = y + x * self.num_cols
+        #idx = y + x * self.num_cols
+        idx = x + y * self.num_rows
         return idx
 
     def get_state_position(self, idx):
         """Given the state index, return the x, y position.
         """
-        y = idx % self.num_cols
-        x = (idx - y) / self.num_cols
+        #y = idx % self.num_cols
+        #x = (idx - y) / self.num_cols
+        x = idx % self.num_rows
+        y = (idx - x) / self.num_rows
+
         return int(x), int(y)
 
     def get_next_state(self, origin, action):
@@ -308,18 +317,18 @@ class GridWorld(Environment):
         if self.matrix_MDP[x][y] == -1:
             return origin
 
-        if action == 'up' and x > 0:
-            next_x = x - 1
-            next_y = y
-        elif action == 'right' and y < self.num_cols - 1:
+        if action == 'up' and y < self.num_rows - 1:
             next_x = x
             next_y = y + 1
-        elif action == 'down' and x < self.num_rows - 1:
+        elif action == 'right' and x < self.num_cols - 1:
             next_x = x + 1
             next_y = y
-        elif action == 'left' and y > 0:
+        elif action == 'down' and y > 0:
             next_x = x
             next_y = y - 1
+        elif action == 'left' and x > 0:
+            next_x = x - 1
+            next_y = y
         else:  # terminate
             next_state = self.nr_states  # FIXME: the weird termination problem is because of this. Look into this.
             return next_state
