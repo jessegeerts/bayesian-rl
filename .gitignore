@@ -1,4 +1,8 @@
-
+*.pyc
+*.xml
 .ipynb_checkpoints/*
 __pycache__/*
 .idea/*
+.gitattributes
+
+
