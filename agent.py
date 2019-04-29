@@ -6,7 +6,7 @@ from utils import softmax
 
 
 class BayesQlearner(object):
-    """Use bayesian Q learning to estimate a posterior over action values.
+    """Use bayesian Q learning (Dearden) to estimate a posterior over action values.
 
     Following Daw & Dayan, I use beta priors and Dearden's mixture update of the posterior.
     """

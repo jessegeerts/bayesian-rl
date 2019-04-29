@@ -448,3 +448,7 @@ class GridWorld(Environment):
             self.curr_x = next_x
             self.curr_y = next_y
             return next_state, reward
+
+    def set_start_location(self, x, y):
+        self.start_x = x
+        self.start_y = y
