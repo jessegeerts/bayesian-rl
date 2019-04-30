@@ -169,7 +169,7 @@ class KTDV(object):
         self.theta = self.prior_theta
         self.covariance = self.prior_covariance
 
-    def train_one_episode(self, random_policy=False):
+    def train_one_episode(self, random_policy=False, fixed_policy=False):
         self.env.reset()
 
         t = 0
@@ -182,6 +182,8 @@ class KTDV(object):
             # Observe transition and reward;
             if random_policy:
                 a = np.random.choice(self.actions)
+            elif fixed_policy:
+                a = 1
             else:
                 a = self.select_action()
 
