@@ -24,10 +24,13 @@ class Environment(object):
     def define_adjacency_graph(self):
         pass
 
+    def get_adjacency_matrix(self):
+        pass
+
     def create_graph(self):
         """Create networkx graph from adjacency matrix.
         """
-        self.graph = nx.from_numpy_array(self.adjacency_graph)
+        self.graph = nx.from_numpy_array(self.get_adjacency_matrix())
 
     def show_graph(self, map_variable=None, layout=None, node_size=1500, **kwargs):
         """Plot graph showing possible state transitions.
@@ -125,7 +128,6 @@ class Environment(object):
         return m
 
 
-
 class SimpleMDP(Environment):
     """Very simple MDP with states on a linear track. Agent gets reward of 1 if it reaches last state.
     """
@@ -210,6 +212,17 @@ class SimpleMDP(Environment):
         """Return current state idx given current position.
         """
         return self.current_state
+
+    def _fill_adjacency_matrix(self):
+        self.adjacency_graph = np.zeros((self.nr_states, self.nr_states), dtype=np.int)
+        for idx in self.state_indices:
+            if (idx + 1) in self.state_indices:
+                self.adjacency_graph[idx, idx + 1] = 1
+
+    def get_adjacency_matrix(self):
+        if self.adjacency_graph is None:
+            self._fill_adjacency_matrix()
+        return self.adjacency_graph
 
 
 class GridWorld(Environment):
