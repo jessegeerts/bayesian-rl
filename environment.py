@@ -19,6 +19,7 @@ class Environment(object):
         self.rf = None
         self.transition_probabilities = None
         self.terminal_state = None
+        self.state_indices = None
 
     def define_adjacency_graph(self):
         pass
@@ -108,6 +109,21 @@ class Environment(object):
 
     def compute_feature_response(self):
         pass
+
+    def get_transition_matrix(self, policy):
+        transition_matrix = np.zeros([self.nr_states, self.nr_states])
+        for state in self.state_indices:
+            if self.is_terminal(state):
+                continue
+            for action in range(self.nr_actions):
+                transition_matrix[state] += self.transition_probabilities[state, action] * policy[state][action]
+        return transition_matrix
+
+    def get_successor_representation(self, policy, gamma=.95):
+        transition_matrix = self.get_transition_matrix(policy)
+        m = np.linalg.inv(np.eye(self.nr_states) - gamma * transition_matrix)
+        return m
+
 
 
 class SimpleMDP(Environment):

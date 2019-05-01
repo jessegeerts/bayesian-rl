@@ -246,9 +246,86 @@ class KTDV(object):
             return np.eye(self.env.nr_states)[state_idx]
 
 
+class KalmanSR(object):
+    """Estimate the successor representation (Dayan, 1993) using Kalman TD. The policy is deterministic,
+    so the only problem solved here is state prediction.
+    """
+    def __init__(self, environment=SimpleMDP(), gamma=.9, inv_temp=2):
+        self.env = environment
+        self.actions = self.env.actions
+
+        # Parameters
+        self.transition_noise = .005 * np.eye(self.env.nr_states)
+        self.gamma = gamma
+        self.inv_temp = inv_temp  # exploration parameter
+        self.observation_noise_variance = 1
+
+        # Initialise priors
+        self.prior_M = np.eye(self.env.nr_states)
+        self.prior_covariance = np.eye(self.env.nr_states)
+
+        self.M = self.prior_M
+        self.covariance = self.prior_covariance
+
+    def train_one_episode(self):
+        self.env.reset()
+
+        t = 0
+        s = self.env.get_current_state()
+        features = self.get_feature_representation(s)
+
+        results = {}
+
+        while not self.env.is_terminal(self.env.get_current_state()) and t < 1000:
+            # Observe transition and reward;
+            a = 1
+
+            next_state, reward = self.env.act(a)
+
+            next_features = self.get_feature_representation(next_state)
+            H = features - self.gamma * next_features  # Temporal difference features
+
+            # Prediction step;
+            a_priori_covariance = self.covariance + self.transition_noise
+
+            # Compute statistics of interest;
+            phi_hat = np.matmul(self.M.T, H)
+            delta_t = features - phi_hat
+            residual_cov = np.dot(H, np.matmul(a_priori_covariance, H)) + self.observation_noise_variance
+
+            # Correction step;
+            kalman_gain = np.matmul(a_priori_covariance, H) * residual_cov**-1
+
+            delta_M = np.outer(kalman_gain, delta_t)
+            self.M += delta_M
+            self.covariance = a_priori_covariance - np.outer(kalman_gain, residual_cov*kalman_gain)
+
+            # Store results
+            results[t] = {'SR': self.M,
+                          'cov': self.covariance,
+                          'K': kalman_gain,
+                          'dt': delta_t,
+                          'r': reward,
+                          'state': s}
+
+            s = next_state
+            features = self.get_feature_representation(s)
+            t += 1
+
+        return results
+
+    def get_feature_representation(self, state_idx):
+        """Get one-hot feature representation from state index.
+        """
+        if self.env.is_terminal(state_idx):
+            return np.zeros(self.env.nr_states)
+        else:
+            return np.eye(self.env.nr_states)[state_idx]
+
+
 if __name__ == "__main__":
 
-    alg = 0
+    alg = 3
 
     if alg == 0:
         agent = KTDV(environment=GridWorld('./mdps/10x10.mdp'))
@@ -269,4 +346,24 @@ if __name__ == "__main__":
             agent.train_one_episode()
             first_action_dist = agent.q_dists[0][1]
             rvs.append(first_action_dist)
+
+
+    if alg == 2:
+        agent = KTDV(environment=SimpleMDP(nr_states=3))
+
+        all_results = {}
+        for ep in range(50):
+            results = agent.train_one_episode(fixed_policy=True)
+            all_results[ep] = results
+
+
+    if alg == 3:
+        agent = KalmanSR(environment=SimpleMDP(nr_states=5))
+
+        all_results = {}
+        for ep in range(50):
+            results = agent.train_one_episode()
+            all_results[ep] = results
+
+    print('')
 
