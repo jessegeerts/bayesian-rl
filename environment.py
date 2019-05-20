@@ -514,6 +514,10 @@ class TransitionRevaluation(Environment):
             6: 1
         }
 
+        self.reward_function = np.zeros((self.nr_states, self.nr_states))
+        self.reward_function[5, 0] = 10
+        self.reward_function[6, 0] = 1
+
         self.transition_probabilities = self.define_transition_probabilities()
 
         self.possible_start_states = [1, 2]
@@ -549,14 +553,14 @@ class TransitionRevaluation(Environment):
 
     def get_next_state_and_reward(self, current_state):
         next_state = self.get_next_state(current_state)
-        reward = self.get_reward(next_state)
+        reward = self.get_reward(current_state, next_state)
         return next_state, reward
 
     def get_next_state(self, current_state):
         return self.transitions[current_state]
 
-    def get_reward(self, state):
-        return self.reward_function[state]
+    def get_reward(self, state, next_state):
+        return self.reward_function[state, next_state]
 
     def get_current_state(self):
         return self.current_state
