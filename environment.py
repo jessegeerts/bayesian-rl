@@ -24,8 +24,13 @@ class Environment(object):
     def define_adjacency_graph(self):
         pass
 
-    def get_adjacency_matrix(self):
+    def _fill_adjacency_matrix(self):
         pass
+
+    def get_adjacency_matrix(self):
+        if self.adjacency_graph is None:
+            self._fill_adjacency_matrix()
+        return self.adjacency_graph
 
     def create_graph(self):
         """Create networkx graph from adjacency matrix.
@@ -514,6 +519,9 @@ class TransitionRevaluation(Environment):
         self.possible_start_states = [1, 2]
         self.current_state = np.random.choice(self.possible_start_states)
 
+        self._fill_adjacency_matrix()
+        self.create_graph()
+
     def reset(self):
         self.current_state = np.random.choice(self.possible_start_states)
 
@@ -565,6 +573,40 @@ class TransitionRevaluation(Environment):
             5: 0,
             6: 0
         }
+        self._fill_adjacency_matrix()
+        self.create_graph()
+
+    def _fill_adjacency_matrix(self):
+        self.adjacency_graph = np.zeros((self.nr_states, self.nr_states))
+        for s, sprime in self.transitions.items():
+            if sprime is None:
+                continue
+            if self.transitions[s] == sprime:
+                self.adjacency_graph[s, sprime] = 1
+
+    def create_graph(self):
+        """Create networkx graph from adjacency matrix, minus the terminal state.
+        """
+        self.graph = nx.from_numpy_array(self.get_adjacency_matrix()[1:, 1:])
+
+    def show_graph(self, map_variable=None, layout=None, node_size=1500, **kwargs):
+        """Plot graph showing possible state transitions.
+
+        :param node_size:
+        :param map_variable: Continuous variable that can be mapped on the node colours.
+        :param layout:
+        :param kwargs: Any other drawing parameters accepted. See nx.draw docs.
+        :return:
+        """
+        if layout is None:
+            layout = nx.spring_layout(self.graph)
+        if map_variable is not None:
+            categories = pd.Categorical(map_variable)
+            node_color = categories
+        else:
+            node_color = 'b'
+
+        nx.draw(self.graph, with_labels=True, pos=layout, node_color=node_color, node_size=node_size, **kwargs)
 
 
 
@@ -575,3 +617,4 @@ if __name__ == '__main__':
 
     ag = LinearKalmanSRTD(en)
     ag.train_one_episode()
+    ag.env._fill_adjacency_matrix()
