@@ -477,3 +477,101 @@ class GridWorld(Environment):
             self.curr_x = next_x
             self.curr_y = next_y
             return next_state, reward
+
+
+class TransitionRevaluation(Environment):
+    """This class simulates the transition revaluation experiment designed by Momennejad et al. (2017).
+    """
+    def __init__(self):
+        Environment.__init__(self)
+        self.nr_states = 7
+        self.state_indices = list(range(self.nr_states))
+        self.nr_actions = None
+        self.actions = None
+
+        self.transitions = {
+            0: None,  # Zero is the terminal state.
+            1: 3,
+            2: 4,
+            3: 5,
+            4: 6,
+            5: 0,
+            6: 0
+        }
+
+        self.reward_function = {
+            0: 0,
+            1: 0,
+            2: 0,
+            3: 0,
+            4: 0,
+            5: 10,
+            6: 1
+        }
+
+        self.transition_probabilities = self.define_transition_probabilities()
+
+        self.possible_start_states = [1, 2]
+        self.current_state = np.random.choice(self.possible_start_states)
+
+    def reset(self):
+        self.current_state = np.random.choice(self.possible_start_states)
+
+    def define_transition_probabilities(self):
+        transition_probabilities = np.zeros([self.nr_states, self.nr_states])
+        for predecessor in self.state_indices:
+            if self.is_terminal(predecessor):
+                transition_probabilities[predecessor, :] = 0
+                continue
+
+            successor = self.transitions[predecessor]
+
+            transition_probabilities[predecessor, successor] = 1
+        return transition_probabilities
+
+    def is_terminal(self, state_idx):
+        return True if state_idx == 0 else False
+
+    def act(self, action=None):
+        """Gets next state given previous state.
+        """
+        next_state, reward = self.get_next_state_and_reward(self.current_state)
+        self.current_state = next_state
+        return next_state, reward
+
+    def get_next_state_and_reward(self, current_state):
+        next_state = self.get_next_state(current_state)
+        reward = self.get_reward(next_state)
+        return next_state, reward
+
+    def get_next_state(self, current_state):
+        return self.transitions[current_state]
+
+    def get_reward(self, state):
+        return self.reward_function[state]
+
+    def get_current_state(self):
+        return self.current_state
+
+    def set_relearning_phase(self):
+        self.possible_start_states = [3, 4]
+
+        self.transitions = {
+            0: None,  # Zero is the terminal state.
+            1: 3,
+            2: 4,
+            3: 6,
+            4: 5,
+            5: 0,
+            6: 0
+        }
+
+
+
+if __name__ == '__main__':
+    from agent import LinearKalmanSRTD
+
+    en = TransitionRevaluation()
+
+    ag = LinearKalmanSRTD(en)
+    ag.train_one_episode()
