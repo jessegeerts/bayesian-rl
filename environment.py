@@ -19,14 +19,18 @@ class Environment(object):
         self.rf = None
         self.transition_probabilities = None
         self.terminal_state = None
+        self.state_indices = None
 
     def define_adjacency_graph(self):
+        pass
+
+    def get_adjacency_matrix(self):
         pass
 
     def create_graph(self):
         """Create networkx graph from adjacency matrix.
         """
-        self.graph = nx.from_numpy_array(self.adjacency_graph)
+        self.graph = nx.from_numpy_array(self.get_adjacency_matrix())
 
     def show_graph(self, map_variable=None, layout=None, node_size=1500, **kwargs):
         """Plot graph showing possible state transitions.
@@ -108,6 +112,20 @@ class Environment(object):
 
     def compute_feature_response(self):
         pass
+
+    def get_transition_matrix(self, policy):
+        transition_matrix = np.zeros([self.nr_states, self.nr_states])
+        for state in self.state_indices:
+            if self.is_terminal(state):
+                continue
+            for action in range(self.nr_actions):
+                transition_matrix[state] += self.transition_probabilities[state, action] * policy[state][action]
+        return transition_matrix
+
+    def get_successor_representation(self, policy, gamma=.95):
+        transition_matrix = self.get_transition_matrix(policy)
+        m = np.linalg.inv(np.eye(self.nr_states) - gamma * transition_matrix)
+        return m
 
 
 class SimpleMDP(Environment):
@@ -194,6 +212,17 @@ class SimpleMDP(Environment):
         """Return current state idx given current position.
         """
         return self.current_state
+
+    def _fill_adjacency_matrix(self):
+        self.adjacency_graph = np.zeros((self.nr_states, self.nr_states), dtype=np.int)
+        for idx in self.state_indices:
+            if (idx + 1) in self.state_indices:
+                self.adjacency_graph[idx, idx + 1] = 1
+
+    def get_adjacency_matrix(self):
+        if self.adjacency_graph is None:
+            self._fill_adjacency_matrix()
+        return self.adjacency_graph
 
 
 class GridWorld(Environment):
@@ -449,6 +478,100 @@ class GridWorld(Environment):
             self.curr_y = next_y
             return next_state, reward
 
-    def set_start_location(self, x, y):
-        self.start_x = x
-        self.start_y = y
+
+class TransitionRevaluation(Environment):
+    """This class simulates the transition revaluation experiment designed by Momennejad et al. (2017).
+    """
+    def __init__(self):
+        Environment.__init__(self)
+        self.nr_states = 7
+        self.state_indices = list(range(self.nr_states))
+        self.nr_actions = None
+        self.actions = None
+
+        self.transitions = {
+            0: None,  # Zero is the terminal state.
+            1: 3,
+            2: 4,
+            3: 5,
+            4: 6,
+            5: 0,
+            6: 0
+        }
+
+        self.reward_function = {
+            0: 0,
+            1: 0,
+            2: 0,
+            3: 0,
+            4: 0,
+            5: 10,
+            6: 1
+        }
+
+        self.transition_probabilities = self.define_transition_probabilities()
+
+        self.possible_start_states = [1, 2]
+        self.current_state = np.random.choice(self.possible_start_states)
+
+    def reset(self):
+        self.current_state = np.random.choice(self.possible_start_states)
+
+    def define_transition_probabilities(self):
+        transition_probabilities = np.zeros([self.nr_states, self.nr_states])
+        for predecessor in self.state_indices:
+            if self.is_terminal(predecessor):
+                transition_probabilities[predecessor, :] = 0
+                continue
+
+            successor = self.transitions[predecessor]
+
+            transition_probabilities[predecessor, successor] = 1
+        return transition_probabilities
+
+    def is_terminal(self, state_idx):
+        return True if state_idx == 0 else False
+
+    def act(self, action=None):
+        """Gets next state given previous state.
+        """
+        next_state, reward = self.get_next_state_and_reward(self.current_state)
+        self.current_state = next_state
+        return next_state, reward
+
+    def get_next_state_and_reward(self, current_state):
+        next_state = self.get_next_state(current_state)
+        reward = self.get_reward(next_state)
+        return next_state, reward
+
+    def get_next_state(self, current_state):
+        return self.transitions[current_state]
+
+    def get_reward(self, state):
+        return self.reward_function[state]
+
+    def get_current_state(self):
+        return self.current_state
+
+    def set_relearning_phase(self):
+        self.possible_start_states = [3, 4]
+
+        self.transitions = {
+            0: None,  # Zero is the terminal state.
+            1: 3,
+            2: 4,
+            3: 6,
+            4: 5,
+            5: 0,
+            6: 0
+        }
+
+
+
+if __name__ == '__main__':
+    from agent import LinearKalmanSRTD
+
+    en = TransitionRevaluation()
+
+    ag = LinearKalmanSRTD(en)
+    ag.train_one_episode()

@@ -41,3 +41,29 @@ def softmax(x, beta=2):
     """
     x = np.array(x)
     return np.exp(beta * x) / sum(np.exp(beta * x))
+
+
+def product_var(exp_x, exp_y, var_x, var_y):
+    """Compute the variance of the product of two independent random variables given their expectation and variance.
+
+    :param exp_x:
+    :param exp_y:
+    :param var_x:
+    :param var_y:
+    :return:
+    """
+    return var_x * var_y + var_x * exp_y**2 + var_y * exp_x**2
+
+
+def dotproduct_var(exp_x, exp_y, var_x, var_y):
+    """Compute the variance of the product of two independent random variables given their expectation and variance.
+
+    :param exp_x:
+    :param exp_y:
+    :param var_x:
+    :param var_y:
+    :return:
+    """
+    var = sum([product_var(exp_x[i], exp_y[i], var_x[i], var_y[i]) for i in range(len(exp_x))])
+    return var
+
