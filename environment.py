@@ -589,7 +589,7 @@ class TransitionRevaluation(Environment):
         """
         self.graph = nx.from_numpy_array(self.get_adjacency_matrix()[1:, 1:])
 
-    def show_graph(self, map_variable=None, layout=None, node_size=1500, **kwargs):
+    def show_graph(self, layout=None, colour=None, node_size=1500, **kwargs):
         """Plot graph showing possible state transitions.
 
         :param node_size:
@@ -599,14 +599,14 @@ class TransitionRevaluation(Environment):
         :return:
         """
         if layout is None:
-            layout = nx.spring_layout(self.graph)
-        if map_variable is not None:
-            categories = pd.Categorical(map_variable)
-            node_color = categories
+            layout = {0: (0, 0), 1: (0, 1), 2: (1, 0), 3: (1, 1), 4: (2, 0), 5: (2, 1)}
+        if colour is None:
+            color_map = ['g', 'g', 'b', 'b', 'r', 'r']
         else:
-            node_color = 'b'
-
-        nx.draw(self.graph, with_labels=True, pos=layout, node_color=node_color, node_size=node_size, **kwargs)
+            color_map = None
+        labels = {i: i+1 for i in range(self.nr_states-1)}
+        nx.draw(self.graph, with_labels=True, pos=layout, node_size=node_size, labels=labels,
+                node_color=color_map, **kwargs)
 
 
 
