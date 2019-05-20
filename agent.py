@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.stats import beta
+from scipy.linalg import ldl
 
 from environment import SimpleMDP, GridWorld
 from utils import softmax, dotproduct_var, product_var
@@ -342,23 +343,25 @@ class KalmanSR(object):
             return np.eye(self.env.nr_states)[state_idx]
 
 
-class KalmanSRTD(object):
+class UnscentedKalmanSRTD(object):
     """Estimate the successor representation (Dayan, 1993) using Kalman TD. The policy is deterministic,
-    so the only problem solved here is prediction.
+    so the only problem solved here is prediction. We use the unscented transform, so that any time of function
+    approximation can be applied.
     """
-    def __init__(self, environment=SimpleMDP(), gamma=.9, inv_temp=2):
+    def __init__(self, environment=SimpleMDP(), gamma=.9, kappa=1., inv_temp=2):
         self.env = environment
         self.actions = self.env.actions
 
         # Parameters
         self.transition_noise = .005 * np.eye(self.env.nr_states**2)
         self.gamma = gamma
+        self.kappa = kappa
         self.inv_temp = inv_temp  # exploration parameter
-        self.observation_noise_variance = 1
+        self.observation_noise_variance = np.eye(self.env.nr_states)
 
         # Initialise priors
         self.prior_M = np.eye(self.env.nr_states).flatten()
-        self.prior_covariance = np.eye(self.env.nr_states**2)
+        self.prior_covariance = np.eye(self.env.nr_states**2) * .1
 
         self.M = self.prior_M
         self.covariance = self.prior_covariance
@@ -380,34 +383,29 @@ class KalmanSRTD(object):
 
             next_features = self.get_feature_representation(next_state)
             H = features - self.gamma * next_features  # Temporal difference features
+            feature_block_matrix = np.kron(H, np.eye(self.env.nr_states)).T
 
             # Prediction step;
             a_priori_covariance = self.covariance + self.transition_noise
 
+            # Compute sigma points
+            X, weights = self.sample_sigma_points()
+            Y = np.matmul(X, feature_block_matrix)
+
             # Compute statistics of interest;
-            phi_hat = np.matmul(self.M.T, H)
-            r_hat = np.dot(self.w, features)
+            phi_hat = np.multiply(Y, weights[:, np.newaxis]).sum(axis=0)
+            param_error_cov = np.sum([weights[j] * np.outer((X[j] - self.M), (Y[j] - phi_hat))
+                                      for j in range(len(weights))], axis=0)  # TODO: rewrite as matmul
+            residual_cov = np.maximum(np.sum([weights[j] * np.outer((Y[j] - phi_hat), (Y[j] - phi_hat))
+                                              for j in range(len(weights))], axis=0), 10e-5)
             delta_t = features - phi_hat
-            rpe = reward - r_hat
-            residual_cov = np.dot(H, np.matmul(a_priori_covariance, H)) + self.observation_noise_variance
 
             # Correction step;
-            kalman_gain = np.matmul(a_priori_covariance, H) * residual_cov**-1
+            kalman_gain = np.matmul(param_error_cov, np.linalg.inv(residual_cov))
 
-            delta_M = np.outer(kalman_gain, delta_t)
+            delta_M = np.matmul(kalman_gain, delta_t)
             self.M += delta_M
-            self.w = self.w + kalman_gain * rpe
-            self.covariance = a_priori_covariance - np.outer(kalman_gain, residual_cov*kalman_gain)
-
-            V = np.matmul(self.M, self.w)
-            #V_variance = np.array([dotproduct_var(self.M[i, :-1],
-            #                                      self.w[:-1],
-            #                                      np.diag(self.covariance)[:-1],
-            #                                      np.diag(self.covariance[:-1])) for i in range(self.env.nr_states)])
-
-            V_variance = np.array([product_var(self.M[i, -2], self.w[-2],
-                                      np.diag(self.covariance)[i], np.diag(self.covariance)[i])
-                          for i in range(self.env.nr_states)])
+            self.covariance = a_priori_covariance - np.matmul(np.matmul(kalman_gain, residual_cov), kalman_gain.T)
 
             # Store results
             results[t] = {'SR': self.M,
@@ -415,12 +413,109 @@ class KalmanSRTD(object):
                           'K': kalman_gain,
                           'dt': delta_t,
                           'r': reward,
-                          'state': s,
-                          'V': V,
-                          'V_var': V_variance,
-                          'w': self.w}
+                          'state': s}
 
-            # TODO: after lunch, check this works but also compute variance over V
+            s = next_state
+            features = self.get_feature_representation(s)
+            t += 1
+
+        return results
+
+    def get_feature_representation(self, state_idx):
+        """Get one-hot feature representation from state index.
+        """
+        if self.env.is_terminal(state_idx):
+            return np.zeros(self.env.nr_states)
+        else:
+            return np.eye(self.env.nr_states)[state_idx]
+
+    def sample_sigma_points(self):
+        n = len(self.M)
+        X = np.empty((2 * n + 1, n))
+        X[:, :] = self.M[None, :]  # fill array with m for each sample
+        try:
+            C = np.linalg.cholesky((self.kappa + n) * self.covariance)
+        except:
+            C, d, perm = ldl((self.kappa + n) * self.covariance)
+
+        for j in range(n):
+            X[j + 1, :] += C[:, j]
+            X[j + n + 1, :] -= C[:, j]
+
+        weights = np.ones(2 * n + 1) * (1. / (2 * (self.kappa + n)))
+        weights[0] = (self.kappa / (self.kappa + n))
+        return X, weights
+
+
+class LinearKalmanSRTD(object):
+    """Estimate the successor representation (Dayan, 1993) using Kalman TD. The policy is deterministic,
+    so the only problem solved here is prediction.
+    """
+    def __init__(self, environment=SimpleMDP(), gamma=.9, kappa=1., inv_temp=2):
+        self.env = environment
+        self.actions = self.env.actions
+
+        self.control = True if self.env.actions is not None else False
+
+        # Parameters
+        self.transition_noise = .005 * np.eye(self.env.nr_states**2)
+        self.gamma = gamma
+        self.kappa = kappa
+        self.inv_temp = inv_temp  # exploration parameter
+        self.observation_noise_variance = np.eye(self.env.nr_states)
+
+        # Initialise priors
+        self.prior_M = np.eye(self.env.nr_states).flatten()
+        self.prior_covariance = np.eye(self.env.nr_states**2) * .1
+
+        self.M = self.prior_M
+        self.covariance = self.prior_covariance
+
+    def train_one_episode(self):
+        self.env.reset()
+
+        t = 0
+        s = self.env.get_current_state()
+        features = self.get_feature_representation(s)
+
+        results = {}
+
+        while not self.env.is_terminal(self.env.get_current_state()) and t < 1000:
+            # Observe transition and reward;
+            a = 1  # = np.random.choice(self.env.actions)
+
+            next_state, reward = self.env.act(a)
+
+            next_features = self.get_feature_representation(next_state)
+            H = features - self.gamma * next_features  # Temporal difference features
+            feature_block_matrix = np.kron(H, np.eye(self.env.nr_states)).T
+
+            # Prediction step;
+            a_priori_covariance = self.covariance + self.transition_noise
+
+            # Compute statistics of interest;
+            phi_hat = np.matmul(feature_block_matrix.T, self.M)
+            parameter_error_cov = np.matmul(a_priori_covariance, feature_block_matrix)
+            residual_cov = np.matmul(np.matmul(feature_block_matrix.T, a_priori_covariance),
+                                     feature_block_matrix) + self.observation_noise_variance
+
+            delta_t = features - phi_hat
+
+            # Correction step;
+            kalman_gain = np.matmul(parameter_error_cov, np.linalg.inv(residual_cov))
+
+            delta_M = np.matmul(kalman_gain, delta_t)
+            self.M += delta_M
+            self.covariance = a_priori_covariance - np.matmul(np.matmul(kalman_gain, residual_cov), kalman_gain.T)
+
+            # Store results
+            results[t] = {'SR': self.M,
+                          'cov': self.covariance,
+                          'K': kalman_gain,
+                          'dt': delta_t,
+                          'r': reward,
+                          'state': s}
+
             s = next_state
             features = self.get_feature_representation(s)
             t += 1
@@ -439,7 +534,7 @@ class KalmanSRTD(object):
 
 if __name__ == "__main__":
 
-    alg = 3
+    alg = 5
 
     if alg == 0:
         agent = KTDV(environment=GridWorld('./mdps/10x10.mdp'))
@@ -478,6 +573,24 @@ if __name__ == "__main__":
         for ep in range(50):
             results = agent.train_one_episode()
             all_results[ep] = results
+
+    if alg == 4:
+        agent = UnscentedKalmanSRTD(environment=SimpleMDP(nr_states=5))
+
+        all_results = {}
+        for ep in range(50):
+            results = agent.train_one_episode()
+            all_results[ep] = results
+
+    if alg == 5:
+        agent = LinearKalmanSRTD(environment=SimpleMDP(nr_states=5))
+
+        all_results = {}
+        for ep in range(50):
+            results = agent.train_one_episode()
+            all_results[ep] = results
+
+
 
     print('')
 
