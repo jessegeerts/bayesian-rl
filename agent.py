@@ -459,17 +459,24 @@ class LinearKalmanSRTD(object):
 
         # Parameters
         self.transition_noise = .005 * np.eye(self.env.nr_states**2)
+        self.r_transition_noise = .01 * np.eye(self.env.nr_states)
         self.gamma = gamma
         self.kappa = kappa
         self.inv_temp = inv_temp  # exploration parameter
         self.observation_noise_variance = np.eye(self.env.nr_states)
+        self.r_observation_noise_variance = 1
 
         # Initialise priors
+        self.prior_w = np.zeros(self.env.nr_states)
+
         self.prior_M = np.eye(self.env.nr_states).flatten()
         self.prior_covariance = np.eye(self.env.nr_states**2) * .1
+        self.prior_reward_covariance = np.eye(self.env.nr_states)
 
         self.M = self.prior_M
+        self.w = self.prior_w
         self.covariance = self.prior_covariance
+        self.reward_covariance = self.prior_reward_covariance
 
     def train_one_episode(self):
         self.env.reset()
@@ -492,21 +499,30 @@ class LinearKalmanSRTD(object):
 
             # Prediction step;
             a_priori_covariance = self.covariance + self.transition_noise
+            a_priori_r_covariance = self.reward_covariance + self.r_transition_noise
 
             # Compute statistics of interest;
             phi_hat = np.matmul(feature_block_matrix.T, self.M)
+            r_hat = np.dot(self.w, features)
             parameter_error_cov = np.matmul(a_priori_covariance, feature_block_matrix)
             residual_cov = np.matmul(np.matmul(feature_block_matrix.T, a_priori_covariance),
                                      feature_block_matrix) + self.observation_noise_variance
+            # For RW:
+            residual_cov_rw = features @ a_priori_r_covariance @ features.T + self.r_observation_noise_variance
 
             delta_t = features - phi_hat
+            rpe = reward - r_hat
 
             # Correction step;
             kalman_gain = np.matmul(parameter_error_cov, np.linalg.inv(residual_cov))
+            r_kalman_gain = a_priori_r_covariance @ features.T / residual_cov_rw
 
             delta_M = np.matmul(kalman_gain, delta_t)
             self.M += delta_M
+            self.w += r_kalman_gain * rpe
             self.covariance = a_priori_covariance - np.matmul(np.matmul(kalman_gain, residual_cov), kalman_gain.T)
+            self.reward_covariance = self.reward_covariance - np.outer(r_kalman_gain, features) @ a_priori_r_covariance
+
 
             # Store results
             results[t] = {'SR': self.M,
@@ -533,6 +549,7 @@ class LinearKalmanSRTD(object):
 
 
 if __name__ == "__main__":
+    from environment import TransitionRevaluation
 
     alg = 5
 
@@ -583,7 +600,7 @@ if __name__ == "__main__":
             all_results[ep] = results
 
     if alg == 5:
-        agent = LinearKalmanSRTD(environment=SimpleMDP(nr_states=5))
+        agent = LinearKalmanSRTD(environment=TransitionRevaluation())
 
         all_results = {}
         for ep in range(50):
