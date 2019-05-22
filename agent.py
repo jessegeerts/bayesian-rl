@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.stats import beta
 from scipy.linalg import ldl
+from itertools import product
 
 from environment import SimpleMDP, GridWorld
 from utils import softmax, dotproduct_var, product_var
@@ -458,25 +459,28 @@ class LinearKalmanSRTD(object):
         self.control = True if self.env.actions is not None else False
 
         # Parameters
-        self.transition_noise = .005 * np.eye(self.env.nr_states**2)
-        self.r_transition_noise = .01 * np.eye(self.env.nr_states)
+        self.n = self.env.nr_states
+        self.transition_noise = .0001 * np.eye(self.n ** 2)
+        self.r_transition_noise = .01 * np.eye(self.n)
         self.gamma = gamma
         self.kappa = kappa
         self.inv_temp = inv_temp  # exploration parameter
-        self.observation_noise_variance = np.eye(self.env.nr_states)
+        self.observation_noise_variance = np.eye(self.n)
         self.r_observation_noise_variance = 1
 
         # Initialise priors
         self.prior_w = np.zeros(self.env.nr_states)
 
-        self.prior_M = np.eye(self.env.nr_states).flatten()
-        self.prior_covariance = np.eye(self.env.nr_states**2) * .1
-        self.prior_reward_covariance = np.eye(self.env.nr_states)
+        self.prior_M = np.eye(self.n).flatten()
+        self.prior_covariance = np.eye(self.n ** 2) * .1
+        self.prior_reward_covariance = np.eye(self.n)
 
         self.M = self.prior_M
         self.w = self.prior_w
         self.covariance = self.prior_covariance
         self.reward_covariance = self.prior_reward_covariance
+
+        self.m_labels = ['M{}-{}'.format(i, j) for i, j in product(list(range(self.n)), list(range(self.n)))]
 
     def train_one_episode(self):
         self.env.reset()
@@ -495,7 +499,7 @@ class LinearKalmanSRTD(object):
 
             next_features = self.get_feature_representation(next_state)
             H = features - self.gamma * next_features  # Temporal difference features
-            feature_block_matrix = np.kron(H, np.eye(self.env.nr_states)).T
+            feature_block_matrix = np.kron(H, np.eye(self.n)).T
 
             # Prediction step;
             a_priori_covariance = self.covariance + self.transition_noise
@@ -523,7 +527,6 @@ class LinearKalmanSRTD(object):
             self.covariance = a_priori_covariance - np.matmul(np.matmul(kalman_gain, residual_cov), kalman_gain.T)
             self.reward_covariance = self.reward_covariance - np.outer(r_kalman_gain, features) @ a_priori_r_covariance
 
-
             # Store results
             results[t] = {'SR': self.M,
                           'cov': self.covariance,
@@ -545,6 +548,17 @@ class LinearKalmanSRTD(object):
             return np.zeros(self.env.nr_states)
         else:
             return np.eye(self.env.nr_states)[state_idx]
+
+    def get_covariance(self, m_idx_1, m_idx_2):
+        """Returns the estimated covariance between two parameters.
+
+        :param m_idx_1: A 2D tuple or list containing the index in the SR matrix (one index for each dimension).
+        :param m_idx_2: A 2D tuple or list containing the index in the SR matrix (one index for each dimension).
+        :return:
+        """
+        flat_idx_1 = np.ravel_multi_index(m_idx_1, (self.n, self.n))
+        flat_idx_2 = np.ravel_multi_index(m_idx_2, (self.n, self.n))
+        return self.covariance[flat_idx_1, flat_idx_2]
 
 
 
@@ -607,6 +621,10 @@ if __name__ == "__main__":
             results = agent.train_one_episode()
             all_results[ep] = results
 
+        agent.env.set_relearning_phase()
+
+        for i in range(20):
+            agent.train_one_episode()
 
 
     print('')
