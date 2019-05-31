@@ -3,7 +3,7 @@ from scipy.stats import beta
 from scipy.linalg import ldl
 from itertools import product
 
-from environment import SimpleMDP, GridWorld
+from environment import SimpleMDP, GridWorld, Environment
 from utils import softmax, dotproduct_var, product_var
 
 
@@ -13,7 +13,7 @@ class BayesQlearner(object):
     Following Daw & Dayan, I use beta priors and Dearden's mixture update of the posterior.
     """
 
-    def __init__(self, environment=SimpleMDP(), inv_temp=2):
+    def __init__(self, environment=Environment(), inv_temp=2):
         self.inv_temp = inv_temp
         self.env = environment
         self.actions = np.arange(self.env.nr_actions)
@@ -154,7 +154,7 @@ class KTDV(object):
 
     We ignore control for now. The agent follows a random policy.
     """
-    def __init__(self, environment=SimpleMDP(), gamma=.9, inv_temp=2):
+    def __init__(self, environment=Environment(), gamma=.9, inv_temp=2):
         self.env = environment
         self.actions = self.env.actions
 
@@ -251,7 +251,7 @@ class KTDV(object):
 class XKTDV(object):
     """Extended KTD-V (algorithm 5 in Geist & Pietquin). Uses coloured noise model.
     """
-    def __init__(self, environment=SimpleMDP(), transition_noise=.005, gamma=.9, inv_temp=2, kappa=1.):
+    def __init__(self, environment=Environment(), transition_noise=.005, gamma=.9, inv_temp=2, kappa=1.):
         self.env = environment
 
         # Parameters
@@ -359,7 +359,7 @@ class KalmanSR(object):
     """Estimate the successor representation (Dayan, 1993) using Kalman TD. The policy is deterministic,
     so the only problem solved here is prediction.
     """
-    def __init__(self, environment=SimpleMDP(), gamma=.9, inv_temp=2):
+    def __init__(self, environment=Environment(), gamma=.9, inv_temp=2):
         self.env = environment
         self.actions = self.env.actions
 
@@ -456,7 +456,7 @@ class UnscentedKalmanSRTD(object):
     so the only problem solved here is prediction. We use the unscented transform, so that any time of function
     approximation can be applied.
     """
-    def __init__(self, environment=SimpleMDP(), gamma=.9, kappa=1., inv_temp=2):
+    def __init__(self, environment=Environment(), gamma=.9, kappa=1., inv_temp=2):
         self.env = environment
         self.actions = self.env.actions
 
@@ -559,7 +559,7 @@ class LinearKalmanSRTD(object):
     """Estimate the successor representation (Dayan, 1993) using Kalman TD. The policy is deterministic,
     so the only problem solved here is prediction.
     """
-    def __init__(self, environment=SimpleMDP(), gamma=.9, kappa=1., inv_temp=2):
+    def __init__(self, environment=Environment(), gamma=.9, kappa=1., inv_temp=2):
         self.env = environment
         self.actions = self.env.actions
 

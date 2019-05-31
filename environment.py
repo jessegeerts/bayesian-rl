@@ -11,6 +11,7 @@ class Environment(object):
     def __init__(self):
         self.nr_states = None
         self.nr_actions = None
+        self.actions = None
         self.adjacency_graph = None
         self.goal_state = None
         self.reward_func = None
@@ -20,6 +21,18 @@ class Environment(object):
         self.transition_probabilities = None
         self.terminal_state = None
         self.state_indices = None
+
+    def get_current_state(self):
+        pass
+
+    def reset(self):
+        pass
+
+    def act(self, action):
+        pass
+
+    def set_relearning_phase(self):
+        pass
 
     def define_adjacency_graph(self):
         pass
