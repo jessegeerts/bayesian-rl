@@ -248,6 +248,113 @@ class KTDV(object):
             return np.eye(self.env.nr_states)[state_idx]
 
 
+class XKTDV(object):
+    """Extended KTD-V (algorithm 5 in Geist & Pietquin). Uses coloured noise model.
+    """
+    def __init__(self, environment=SimpleMDP(), transition_noise=.005, gamma=.9, inv_temp=2, kappa=1.):
+        self.env = environment
+
+        # Parameters
+        self.n = self.env.nr_states
+        self.gamma = gamma
+        self.inv_temp = inv_temp  # exploration parameter
+        self.observation_noise_variance = 1
+        self.kappa = kappa
+
+        # for coloured noise model:
+        self.F = np.zeros((self.n + 2, self.n + 2))
+        self.F[:-2, :-2] = np.eye(self.n)
+        self.F[-2:, -2:] = np.array([[0, 0],
+                                     [1, 0]])
+
+        self.sigma = 1
+        self.Cu = self.sigma * np.array([[1, -self.gamma], [-self.gamma, self.gamma**2]])
+        self.transition_noise = np.zeros((self.n + 2, self.n + 2))
+        self.transition_noise[:-2, :-2] = transition_noise * np.eye(self.n)
+        self.transition_noise[-2:, -2:] = self.Cu
+
+        # Initialise priors
+        self.prior_x = np.zeros(self.n + 2)  # Note: x contains parameters theta appended with vectorial AR noise
+        self.prior_covariance = np.eye(self.n + 2) * .01
+
+        self.x = self.prior_x
+        self.covariance = self.prior_covariance
+
+    def train_one_episode(self):
+        self.env.reset()
+
+        t = 0
+        s = self.env.get_current_state()
+        features = self.get_feature_representation(s)
+
+        results = {}
+
+        while not self.env.is_terminal(self.env.get_current_state()) and t < 1000:
+            # observe transition and reward
+            a = 1
+
+            next_state, reward = self.env.act(a)
+            next_features = self.get_feature_representation(next_state)
+            H = features - self.gamma * next_features  # temporal difference features
+
+            # Prediction step
+            self.x = self.F @ self.x
+            self.covariance = self.F @ self.covariance @ self.F.T + self.transition_noise
+
+            # Sigma points computation
+            X, weights = self.sample_sigma_points()
+            Y = np.array([np.dot(H, X[j, :-2]) for j in range(X.shape[0])])
+
+            r_hat = np.dot(weights, Y)
+            Cxr = np.sum([weights[j] * (X[j] - self.x) * (Y[j] - r_hat) for j in range(X.shape[0])], axis=0)
+            Cr = np.sum([weights[j] * (Y[j] - r_hat) * (Y[j] - r_hat) for j in range(X.shape[0])], axis=0)
+
+            # Correction step
+            K = Cxr / Cr
+            self.x += K * (reward - r_hat)
+            self.covariance -= np.outer(K,  Cr * K)
+
+            # Store results
+            results[t] = {'x': self.x,
+                          'cov': self.covariance,
+                          'K': K,
+                          'dt': reward - r_hat,
+                          'r': reward,
+                          'state': s}
+
+            s = next_state
+            features = self.get_feature_representation(s)
+            t += 1
+
+        return results
+
+    def sample_sigma_points(self):
+        n = len(self.x)
+        X = np.empty((2 * n + 1, n))
+        X[:, :] = self.x[None, :]  # fill array with m for each sample
+        try:
+            C = np.linalg.cholesky((self.kappa + n) * self.covariance)
+        except:
+            print('Cholesky decomposition did not work')
+            C, d, perm = ldl((self.kappa + n) * self.covariance)
+
+        for j in range(n):
+            X[j + 1, :] += C[:, j]
+            X[j + n + 1, :] -= C[:, j]
+
+        weights = np.ones(2 * n + 1) * (1. / (2 * (self.kappa + n)))
+        weights[0] = (self.kappa / (self.kappa + n))
+        return X, weights
+
+    def get_feature_representation(self, state_idx):
+        """Get one-hot feature representation from state index.
+        """
+        if self.env.is_terminal(state_idx):
+            return np.zeros(self.env.nr_states)
+        else:
+            return np.eye(self.env.nr_states)[state_idx]
+
+
 class KalmanSR(object):
     """Estimate the successor representation (Dayan, 1993) using Kalman TD. The policy is deterministic,
     so the only problem solved here is prediction.
