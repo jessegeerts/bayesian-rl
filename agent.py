@@ -668,11 +668,142 @@ class LinearKalmanSRTD(object):
         return self.covariance[flat_idx_1, flat_idx_2]
 
 
+class XtendedKTDSR(object):
+    """Estimate the successor representation (Dayan, 1993) using Kalman TD with coloured noise model.
+    The policy is deterministic, so the only problem solved here is prediction. We use the unscented transform, so that
+    any type of function approximation can be applied.
+    """
+    def __init__(self, environment=SimpleMDP(), gamma=.9, kappa=1., inv_temp=2, transition_noise=.005):
+        #FIXME: This algorithm doesn't converge.
+        self.env = environment
+        self.actions = self.env.actions
+
+        # Parameters
+        self.gamma = gamma
+        self.kappa = kappa
+        self.inv_temp = inv_temp  # exploration parameter
+        self.observation_noise_variance = np.eye(self.env.nr_states)
+        self.n = self.env.nr_states
+
+        # for coloured noise model:
+        x_length = self.n**2 + 2 * self.n  # length of extended parameter vector
+        self.F = np.zeros((x_length, x_length))
+        self.F[:-2*self.n, :-2*self.n] = np.eye(self.n**2)
+        self.F[-self.n:, -2 * self.n: -self.n] = np.eye(self.n)
+
+        self.sigma = 1
+        self.Cu = np.kron(
+            self.sigma * np.array([[1, -self.gamma], [-self.gamma, self.gamma**2]]),
+            np.eye(self.n))
+        self.transition_noise = np.zeros((x_length, x_length))
+        self.transition_noise[:-2 * self.n, :-2 * self.n] = transition_noise * np.eye(self.n ** 2)
+        self.transition_noise[-2 * self.n:, -2 * self.n:] = self.Cu
+
+        # Initialise priors
+        self.prior_M = np.append(np.eye(self.env.nr_states).flatten(), np.zeros(self.n * 2))
+        self.prior_covariance = np.eye(self.env.nr_states**2 + 2* self.n) * .1
+
+        self.M = self.prior_M
+        self.covariance = self.prior_covariance
+
+    def train_one_episode(self):
+        self.env.reset()
+
+        t = 0
+        s = self.env.get_current_state()
+        features = self.get_feature_representation(s)
+
+        results = {}
+
+        while not self.env.is_terminal(self.env.get_current_state()) and t < 1000:
+            # Observe transition and reward;
+            a = 1
+
+            next_state, reward = self.env.act(a)
+
+            next_features = self.get_feature_representation(next_state)
+            H = features - self.gamma * next_features  # Temporal difference features
+            feature_block_matrix = np.kron(H, np.eye(self.env.nr_states)).T
+
+            # Prediction step;
+            self.M = self.F @ self.M
+            a_priori_covariance = self.F @ self.covariance @ self.F.T + self.transition_noise
+
+            # Compute sigma points
+            X, weights = self.sample_sigma_points()
+            n_hat = X[:, -self.n:]
+            Y = np.matmul(X[:, :-2 * self.n], feature_block_matrix) + n_hat  # broadcast (shared over state)
+
+            # Compute statistics of interest;
+            phi_hat = np.multiply(Y, weights[:, np.newaxis]).sum(axis=0)
+            param_error_cov = np.sum([weights[j] * np.outer((X[j] - self.M), (Y[j] - phi_hat))
+                                      for j in range(len(weights))], axis=0)  # TODO: rewrite as matmul
+            residual_cov = np.maximum(np.sum([weights[j] * np.outer((Y[j] - phi_hat), (Y[j] - phi_hat))
+                                              for j in range(len(weights))], axis=0), 10e-5)
+            delta_t = features - phi_hat
+
+            # Correction step;
+            kalman_gain = np.matmul(param_error_cov, np.linalg.inv(residual_cov))
+
+            delta_M = np.matmul(kalman_gain, delta_t)
+            self.M += delta_M
+            self.covariance = a_priori_covariance - np.matmul(np.matmul(kalman_gain, residual_cov), kalman_gain.T)
+
+            # Store results
+            results[t] = {'SR': self.M,
+                          'cov': self.covariance,
+                          'K': kalman_gain,
+                          'dt': delta_t,
+                          'r': reward,
+                          'state': s}
+
+            s = next_state
+            features = self.get_feature_representation(s)
+            t += 1
+
+        return results
+
+    def get_feature_representation(self, state_idx):
+        """Get one-hot feature representation from state index.
+        """
+        if self.env.is_terminal(state_idx):
+            return np.zeros(self.env.nr_states)
+        else:
+            return np.eye(self.env.nr_states)[state_idx]
+
+    def sample_sigma_points(self):
+        n = len(self.M)
+        X = np.empty((2 * n + 1, n))
+        X[:, :] = self.M[None, :]  # fill array with m for each sample
+        try:
+            C = np.linalg.cholesky((self.kappa + n) * self.covariance)
+        except:
+            C, d, perm = ldl((self.kappa + n) * self.covariance)
+
+        for j in range(n):
+            X[j + 1, :] += C[:, j]
+            X[j + n + 1, :] -= C[:, j]
+
+        weights = np.ones(2 * n + 1) * (1. / (2 * (self.kappa + n)))
+        weights[0] = (self.kappa / (self.kappa + n))
+        return X, weights
+
+    def get_covariance(self, m_idx_1, m_idx_2):
+        """Returns the estimated covariance between two parameters.
+
+        :param m_idx_1: A 2D tuple or list containing the index in the SR matrix (one index for each dimension).
+        :param m_idx_2: A 2D tuple or list containing the index in the SR matrix (one index for each dimension).
+        :return:
+        """
+        flat_idx_1 = np.ravel_multi_index(m_idx_1, (self.n, self.n))
+        flat_idx_2 = np.ravel_multi_index(m_idx_2, (self.n, self.n))
+        return self.covariance[flat_idx_1, flat_idx_2]
+
 
 if __name__ == "__main__":
     from environment import TransitionRevaluation
 
-    alg = 5
+    alg = 6
 
     if alg == 0:
         agent = KTDV(environment=GridWorld('./mdps/10x10.mdp'))
@@ -696,7 +827,7 @@ if __name__ == "__main__":
 
 
     if alg == 2:
-        agent = KTDV(environment=SimpleMDP(nr_states=3))
+        agent = KTDV(environment=SimpleMDP(nr_states=5))
 
         all_results = {}
         for ep in range(50):
@@ -732,6 +863,23 @@ if __name__ == "__main__":
 
         for i in range(20):
             agent.train_one_episode()
+
+    if alg == 6:
+        env = SimpleMDP(nr_states=5)
+        agent = XtendedKTDSR(environment=env)
+
+        for ep in range(100):
+            agent.train_one_episode()
+
+    if alg == 7:
+        env = SimpleMDP(nr_states=5)
+        agent = XKTDV(environment=env)
+
+        all_results = {}
+
+        for ep in range(20):
+            results = agent.train_one_episode()
+            all_results[ep] = results
 
 
     print('')
